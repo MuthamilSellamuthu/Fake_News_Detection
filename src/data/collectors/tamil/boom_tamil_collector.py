@@ -39,9 +39,11 @@ class BoomTamilCollector(BaseCollector):
         max_pages: int = 5,
         fetch_full_text: bool = True,
         filename: str = "boom_tamil.jsonl",
+        skip_existing: bool = True,
     ) -> dict[str, Any]:
         total_records = 0
         total_links_seen = 0
+        existing_urls = self.load_existing_urls(filename) if skip_existing else set()
 
         for page_num in range(1, max_pages + 1):
             url = (
@@ -61,8 +63,18 @@ class BoomTamilCollector(BaseCollector):
                 break
 
             total_links_seen += len(links)
+            new_links = [link for link in links if link.url not in existing_urls]
+            if not new_links:
+                self.logger.info(
+                    "Page %d had no new links (all %d already collected in a previous run); stopping — "
+                    "older pages will also be entirely already-seen since listing is newest-first.",
+                    page_num,
+                    len(links),
+                )
+                break
+
             records = []
-            for link in links:
+            for link in new_links:
                 record: dict[str, Any] = {
                     "source": "boom_tamil",
                     "source_type": "fact_check",
@@ -82,6 +94,7 @@ class BoomTamilCollector(BaseCollector):
                         record["body_text"] = None
 
                 records.append(record)
+                existing_urls.add(link.url)
 
             total_records += self.save_jsonl(records, filename)
 

@@ -53,6 +53,7 @@ class GenericNewsCollector(BaseCollector):
         max_pages_per_section: int = 3,
         fetch_full_text: bool = True,
         filename: str | None = None,
+        skip_existing: bool = True,
     ) -> dict[str, Any]:
         sections = sections or self.SECTIONS
         filename = filename or f"{self.source_name.split('/')[-1]}.jsonl"
@@ -60,6 +61,7 @@ class GenericNewsCollector(BaseCollector):
         total_records = 0
         total_links_seen = 0
         pages_fetched = 0
+        existing_urls = self.load_existing_urls(filename) if skip_existing else set()
 
         for section in sections:
             pattern = self._link_pattern_for_section(section)
@@ -87,8 +89,17 @@ class GenericNewsCollector(BaseCollector):
                     break
 
                 total_links_seen += len(links)
+                new_links = [link for link in links if link.url not in existing_urls]
+                if not new_links:
+                    self.logger.info(
+                        "Page %d of %s had no new links (all already collected); moving to next section.",
+                        page_num,
+                        section,
+                    )
+                    break
+
                 records = []
-                for link in links:
+                for link in new_links:
                     record: dict[str, Any] = {
                         "source": self.source_name.split("/")[-1],
                         "source_type": "mainstream_news",
@@ -105,6 +116,7 @@ class GenericNewsCollector(BaseCollector):
                             extract_article_body(article_response.text) if article_response is not None else None
                         )
                     records.append(record)
+                    existing_urls.add(link.url)
 
                 total_records += self.save_jsonl(records, filename)
 

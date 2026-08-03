@@ -129,6 +129,37 @@ class BaseCollector(ABC):
     def already_collected(self, filename: str) -> bool:
         return (self.output_dir / filename).exists()
 
+    def load_existing_urls(self, filename: str, url_key: str = "url") -> set[str]:
+        """Read whatever's already in `output_dir/filename` and return the
+        set of URLs already collected.
+
+        Lets a scraper be re-run (same day, next day, next week) without
+        re-fetching or duplicating rows it already has — important for
+        sources like Boom Tamil or PIB Fact Check where reaching a large
+        target count means running the collector repeatedly as sites
+        publish new content, not just once.
+        """
+        path = self.output_dir / filename
+        if not path.exists():
+            return set()
+
+        urls: set[str] = set()
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                url = record.get(url_key)
+                if url:
+                    urls.add(url)
+        if urls:
+            self.logger.info("Found %d already-collected URL(s) in %s; will skip re-fetching them.", len(urls), path)
+        return urls
+
     # ------------------------------------------------------------------
     # Subclass contract
     # ------------------------------------------------------------------

@@ -18,7 +18,29 @@ from src.data.collectors.tamil.generic_news_scraper import GenericNewsCollector
 class DailyThanthiCollector(GenericNewsCollector):
     source_name = "tamil/dailythanthi"
     BASE_URL = "https://www.dailythanthi.com"
-    SECTIONS = ["news/tamilnadu", "news/india", "news/world"]
+    # Kept in sync with configs/sources.yaml -> tamil.dailythanthi.sections.
+    # NOTE: this only surfaces each section's current front page (the site's
+    # `?page=N` query param does not appear to change results — confirmed by
+    # a real run where page 2 returned the same articles as page 1). For
+    # real volume, use SitemapDailyThanthiCollector instead, which walks the
+    # site's daily XML sitemaps and reaches thousands of historical articles.
+    SECTIONS = [
+        "news/tamilnadu",
+        "news/india",
+        "news/world",
+        "news/politics",
+        "news/sirappukatturaigal",
+        "cinema/cinemanews",
+        "cinema/ott",
+        "cinema/movie-review",
+        "sports/cricket",
+        "sports/football",
+        "sports/tennis",
+        "sports/hockey",
+        "sports/othersports",
+        "business",
+        "devotional",
+    ]
     LINK_DEPTH_MIN = 2
 
 

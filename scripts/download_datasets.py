@@ -38,6 +38,7 @@ from src.data.collectors.english.isot_collector import IsotCollector  # noqa: E4
 from src.data.collectors.english.welfake_collector import WelfakeCollector  # noqa: E402
 from src.data.collectors.tamil.boom_tamil_collector import BoomTamilCollector  # noqa: E402
 from src.data.collectors.tamil.dailythanthi_collector import DailyThanthiCollector  # noqa: E402
+from src.data.collectors.tamil.dailythanthi_sitemap_collector import DailyThanthiSitemapCollector  # noqa: E402
 from src.data.collectors.tamil.dinamalar_collector import DinamalarCollector  # noqa: E402
 from src.data.collectors.tamil.hindutamil_collector import HinduTamilCollector  # noqa: E402
 from src.data.collectors.tamil.pib_factcheck_collector import PibFactCheckCollector  # noqa: E402
@@ -58,12 +59,21 @@ _REGISTRY: dict[str, type] = {
     "youturn": YouturnCollector,
     "pib_factcheck": PibFactCheckCollector,
     "dailythanthi": DailyThanthiCollector,
+    "dailythanthi_sitemap": DailyThanthiSitemapCollector,
     "dinamalar": DinamalarCollector,
     "hindutamil": HinduTamilCollector,
 }
 
 _ENGLISH_SOURCES = ["welfake", "isot"]
-_TAMIL_SOURCES = ["boom_tamil", "youturn", "pib_factcheck", "dailythanthi", "dinamalar", "hindutamil"]
+_TAMIL_SOURCES = [
+    "boom_tamil",
+    "youturn",
+    "pib_factcheck",
+    "dailythanthi",
+    "dailythanthi_sitemap",
+    "dinamalar",
+    "hindutamil",
+]
 
 
 def _build_kwargs(source: str, args: argparse.Namespace) -> dict[str, Any]:
@@ -82,6 +92,13 @@ def _build_kwargs(source: str, args: argparse.Namespace) -> dict[str, Any]:
 
     if source in ("dailythanthi", "dinamalar", "hindutamil"):
         return {"max_pages_per_section": args.max_pages, "fetch_full_text": not args.no_full_text}
+
+    if source == "dailythanthi_sitemap":
+        return {
+            "max_daily_sitemaps": args.max_daily_sitemaps,
+            "max_articles": args.max_articles,
+            "fetch_full_text": not args.no_full_text,
+        }
 
     return {}
 
@@ -114,13 +131,42 @@ def main() -> None:
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=5,
-        help="Max listing pages (or sections-pages) to fetch per Tamil source. Default: 5.",
+        default=50,
+        help=(
+            "Max listing pages (boom_tamil), or pages-per-section (dailythanthi/dinamalar/"
+            "hindutamil), to fetch per Tamil source. Default: 50. Re-running with the same "
+            "output file skips URLs already collected, so pushing this higher (e.g. 200) and "
+            "re-running periodically is the way to grow toward a large target row count — "
+            "each collector stops early once a page yields no new links."
+        ),
     )
     parser.add_argument(
         "--no-full-text",
         action="store_true",
         help="Collect listing metadata only; skip fetching each article's full body text.",
+    )
+    parser.add_argument(
+        "--max-daily-sitemaps",
+        type=int,
+        default=30,
+        help=(
+            "dailythanthi_sitemap only: how many daily sitemap files to walk in this run "
+            "(most recent first). Each day is typically several hundred article URLs. "
+            "Default: 30."
+        ),
+    )
+    parser.add_argument(
+        "--max-articles",
+        type=int,
+        default=2000,
+        help=(
+            "dailythanthi_sitemap only: hard cap on articles fetched in this run (each "
+            "article is one HTTP request beyond the sitemap fetches, at --rate-limit "
+            "seconds apart, so this is the real time-cost knob — e.g. 2000 articles at "
+            "the default 1.5s rate limit takes ~50 minutes). Re-run with a fresh cap to "
+            "keep accumulating; already-collected URLs are skipped automatically. "
+            "Default: 2000."
+        ),
     )
     parser.add_argument(
         "--force",

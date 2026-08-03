@@ -40,11 +40,16 @@ tamil:
     description: >
       BOOM Tamil fact-check desk. Debunks/verifies viral Tamil claims.
       Listing is server-rendered and paginates at /fact-check/page/{n}.
+      Fact-check desks inherently publish far less volume than daily
+      newsrooms (this is one source among six, and realistically the
+      smallest) — raise max_pages as high as the site's pagination goes
+      before it starts returning empty pages; the collector stops
+      automatically once a page yields no article links.
     base_url: "https://tamil.boomlive.in"
     listing_path: "/fact-check"
     pagination_style: "path_page"     # /fact-check/page/2, /fact-check/page/3, ...
     link_pattern: '^/fact-check/[a-z0-9\-]+-\d+$'
-    max_pages: 5
+    max_pages: 200
     fetch_full_text: true
     source_type: "fact_check"
     verified: true
@@ -90,13 +95,30 @@ tamil:
       paper pairs a fact-checking outlet (majority-fake) with reputable
       newsrooms (majority-real). Built on the Quintype CMS; section
       listing pages were confirmed reachable and server-rendered.
+      Section list expanded (confirmed from the site's live nav bar) and
+      max_pages_per_section raised — this source alone, at 15 sections x
+      100 pages x ~10 articles/page, has enough surface area to reach
+      tens of thousands of rows; actual yield depends on how deep each
+      section's pagination/archive goes before returning empty pages.
     base_url: "https://www.dailythanthi.com"
     sections:
       - "news/tamilnadu"
       - "news/india"
       - "news/world"
+      - "news/politics"
+      - "news/sirappukatturaigal"   # special/feature articles
+      - "cinema/cinemanews"
+      - "cinema/ott"
+      - "cinema/movie-review"
+      - "sports/cricket"
+      - "sports/football"
+      - "sports/tennis"
+      - "sports/hockey"
+      - "sports/othersports"
+      - "business"
+      - "devotional"
     link_depth_min: 2
-    max_pages_per_section: 3
+    max_pages_per_section: 100
     fetch_full_text: true
     source_type: "mainstream_news"
     verified: true
@@ -112,7 +134,7 @@ tamil:
     sections:
       - "news"          # TODO: verify actual section slug(s) on dinamalar.com
     link_depth_min: 2
-    max_pages_per_section: 3
+    max_pages_per_section: 100
     fetch_full_text: true
     source_type: "mainstream_news"
     verified: false
@@ -127,7 +149,7 @@ tamil:
     sections:
       - "news"          # TODO: verify actual section slug(s) on hindutamil.in
     link_depth_min: 2
-    max_pages_per_section: 3
+    max_pages_per_section: 100
     fetch_full_text: true
     source_type: "mainstream_news"
     verified: false
