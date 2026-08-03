@@ -1,0 +1,59 @@
+# ── Core ─────────────────────────────────────────────
+python-dotenv==1.0.1
+pyyaml==6.0.2
+tqdm==4.67.1
+
+# ── Data collection (Module 1: scraping / downloading) ─
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.3.0
+kaggle==1.6.17          # optional Kaggle fallback for WELFake / ISOT
+
+# ── Data handling ────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+imbalanced-learn==0.12.4
+
+# ── NLP / preprocessing ──────────────────────────────
+nltk==3.9.1
+spacy==3.8.2
+regex==2024.9.11
+langdetect==1.0.9
+
+# ── Deep learning ────────────────────────────────────
+torch==2.4.1
+transformers==4.45.2
+datasets==3.0.1
+accelerate==0.34.2
+sentencepiece==0.2.0
+
+# ── Contrastive learning (SimCSE) & sentence embeddings
+sentence-transformers==3.1.1
+
+# ── Fact verification (retrieval / similarity) ───────
+faiss-cpu==1.9.0
+
+# ── Explainable AI ───────────────────────────────────
+shap==0.46.0
+
+# ── Web application ──────────────────────────────────
+flask==3.0.3
+flask-cors==5.0.0
+gunicorn==23.0.0
+
+# ── Evaluation & visualization ───────────────────────
+matplotlib==3.9.2
+seaborn==0.13.2
+umap-learn==0.5.6
+
+# ── Experiment tracking (optional but recommended) ───
+mlflow==2.16.2
+
+# ── Testing ───────────────────────────────────────────
+pytest==8.3.3
+pytest-cov==5.0.0
+
+# ── Notebooks ─────────────────────────────────────────
+jupyter==1.1.1
+ipykernel==6.29.5

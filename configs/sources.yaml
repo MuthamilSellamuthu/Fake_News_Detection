@@ -1,0 +1,133 @@
+# Dataset source configuration for Module 1 (data collection).
+#
+# This file is the single place that knows *where* data comes from, so
+# collector code stays generic and URLs/selectors can be updated here
+# without touching Python. Values marked "verified: false" were not
+# confirmed against live HTML during development (site was JS-rendered,
+# blocked, or not inspected) — check the selectors/section paths before
+# relying on that collector for a full run.
+
+http:
+  user_agent: "Mozilla/5.0 (compatible; FakeNewsResearchBot/0.1; +mailto:research@example.edu)"
+  timeout_seconds: 15
+  rate_limit_seconds: 1.5   # min delay between requests to the same host
+  max_retries: 3
+
+english:
+  welfake:
+    description: >
+      WELFake (72,134 articles; merged Kaggle/McIntire/Reuters/BuzzFeed
+      Political corpora). Downloaded directly from Zenodo (no login/API
+      key required). Kaggle is documented as a fallback mirror.
+    method: direct_download
+    url: "https://zenodo.org/records/4561253/files/WELFake_Dataset.csv?download=1"
+    filename: "WELFake_Dataset.csv"
+    kaggle_fallback_dataset: "saurabhshahane/fake-news-classification"
+    verified: true
+
+  isot:
+    description: >
+      ISOT Fake News Dataset (~45,000 articles), University of Victoria
+      ISOT research lab. Official direct zip download, no login required.
+    method: direct_download_zip
+    url: "https://onlineacademiccommunity.uvic.ca/isot/wp-content/uploads/sites/7295/2023/03/News-_dataset.zip"
+    filename: "News-_dataset.zip"
+    kaggle_fallback_dataset: "clmentbisaillon/fake-and-real-news-dataset"
+    verified: true
+
+tamil:
+  boom_tamil:
+    description: >
+      BOOM Tamil fact-check desk. Debunks/verifies viral Tamil claims.
+      Listing is server-rendered and paginates at /fact-check/page/{n}.
+    base_url: "https://tamil.boomlive.in"
+    listing_path: "/fact-check"
+    pagination_style: "path_page"     # /fact-check/page/2, /fact-check/page/3, ...
+    link_pattern: '^/fact-check/[a-z0-9\-]+-\d+$'
+    max_pages: 5
+    fetch_full_text: true
+    source_type: "fact_check"
+    verified: true
+
+  youturn:
+    description: >
+      YouTurn (youturn.in) — Tamil fact-checking outlet run by People
+      Educational Awareness Trust. The site is a client-side rendered
+      React SPA: a plain HTTP GET returns an empty shell with no article
+      markup, so a static requests+BeautifulSoup scraper cannot see
+      listing content. Collecting this source requires a JS-capable
+      fetch (Selenium/Playwright) or a discovered backend API — neither
+      was confirmed during development. The collector below documents
+      this and fails loudly rather than silently returning nothing.
+    base_url: "https://youturn.in"
+    listing_path: "/tag/tamil-fact-checker"
+    js_rendered: true
+    source_type: "fact_check"
+    verified: false
+
+  pib_factcheck:
+    description: >
+      PIB Fact Check Unit (Government of India). Its dedicated portal
+      (factcheck.pib.gov.in) is a claim-submission form, not a public
+      article archive — published verdicts are distributed primarily via
+      the @PIBFactCheck X/Twitter account and, secondarily, as press
+      releases on pib.gov.in. This collector queries the PIB press
+      release search for the Tamil-language regional feed and filters by
+      a "fact check" keyword; coverage will be partial and should be
+      supplemented manually (e.g. Twitter/X export) if full coverage is
+      needed.
+    base_url: "https://www.pib.gov.in"
+    search_path: "/allRel.aspx"
+    lang_param: 4          # PIB language code observed for Tamil regional releases
+    keyword: "தவறான தகவல்"  # "false information" — used to filter releases
+    source_type: "fact_check"
+    verified: false
+
+  dailythanthi:
+    description: >
+      Daily Thanthi (dailythanthi.com) — mainstream Tamil newspaper.
+      Used as a "real/legitimate news" source, mirroring how the base
+      paper pairs a fact-checking outlet (majority-fake) with reputable
+      newsrooms (majority-real). Built on the Quintype CMS; section
+      listing pages were confirmed reachable and server-rendered.
+    base_url: "https://www.dailythanthi.com"
+    sections:
+      - "news/tamilnadu"
+      - "news/india"
+      - "news/world"
+    link_depth_min: 2
+    max_pages_per_section: 3
+    fetch_full_text: true
+    source_type: "mainstream_news"
+    verified: true
+
+  dinamalar:
+    description: >
+      Dinamalar (dinamalar.com) — mainstream Tamil newspaper, used as a
+      "real/legitimate news" source. The homepage was reachable but not
+      fully inspected (response exceeded inspection size limits during
+      development), so exact section slugs below are best-effort and
+      should be confirmed before a full run.
+    base_url: "https://www.dinamalar.com"
+    sections:
+      - "news"          # TODO: verify actual section slug(s) on dinamalar.com
+    link_depth_min: 2
+    max_pages_per_section: 3
+    fetch_full_text: true
+    source_type: "mainstream_news"
+    verified: false
+
+  hindutamil:
+    description: >
+      The Hindu Tamil (hindutamil.in) — mainstream Tamil newspaper,
+      used as a "real/legitimate news" source. This domain could not be
+      fetched from the development sandbox (blocked), so section slugs
+      and link patterns below are unverified placeholders.
+    base_url: "https://www.hindutamil.in"
+    sections:
+      - "news"          # TODO: verify actual section slug(s) on hindutamil.in
+    link_depth_min: 2
+    max_pages_per_section: 3
+    fetch_full_text: true
+    source_type: "mainstream_news"
+    verified: false

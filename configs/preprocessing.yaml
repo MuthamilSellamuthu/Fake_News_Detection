@@ -1,0 +1,84 @@
+# Module 2 (preprocessing) configuration.
+#
+# Keeping thresholds, keyword lists, and split ratios here — rather than
+# hard-coded in Python — so relabeling rules or split ratios can be
+# tuned without touching pipeline code.
+
+label_encoding:
+  fake: 1
+  real: 0
+
+label_rules:
+  # ISOT ships as two files; the file itself is the label.
+  isot:
+    fake_source_file: "Fake.csv"
+    real_source_file: "True.csv"
+
+  # WELFake's published convention is 0=fake, 1=real (verified against
+  # the dataset's Kaggle/Zenodo documentation) — i.e. inverted relative
+  # to this project's target convention (fake=1, real=0), so it must be
+  # flipped: target_label = 1 - original_label.
+  welfake:
+    original_fake_value: 0
+    original_real_value: 1
+
+  # Tamil sources don't carry a structured verdict field (Module 1 only
+  # collected title/body text), so label assignment falls back to:
+  #   1. a keyword scan of the title+body for an explicit verdict, else
+  #   2. a source-type default (fact-check desks skew fake, mainstream
+  #      newsrooms are treated as real) — mirroring how the base paper's
+  #      IndoHoax dataset assumes a fact-checking platform's submissions
+  #      are majority-hoax. This is an approximation; a human/manual
+  #      verdict-labeling pass is recommended before publication-grade use.
+  fact_check_sources: ["boom_tamil", "youturn", "pib_factcheck"]
+  mainstream_news_sources: ["dailythanthi", "dinamalar", "hindutamil"]
+
+  fake_verdict_keywords:
+    - "தவறான"        # "false/incorrect"
+    - "பொய்"          # "lie"
+    - "ஆழப்போலி"      # "deepfake"
+    - "வதந்தி"        # "rumour"
+    - "misleading"
+    - "false"
+    - "fake"
+    - "hoax"
+    - "fabricated"
+    - "morphed"
+
+  real_verdict_keywords:
+    - "உண்மை"          # "true"
+    - "உண்மையானது"
+    - "சரிபார்க்கப்பட்டது"  # "verified"
+    - "true"
+    - "verified"
+    - "correct"
+    - "genuine"
+
+  default_fact_check_label: 1   # fake, per base-paper-style source assumption
+  default_mainstream_label: 0   # real
+
+cleaning:
+  min_text_length: 20             # chars; shorter than this after cleaning => dropped as "missing"
+  dedup_subset: ["clean_text"]    # exact-match dedup key (post-cleaning)
+
+language_detection:
+  tamil_unicode_start: 0x0B80
+  tamil_unicode_end: 0x0BFF
+  tamil_char_ratio_threshold: 0.3   # >= this fraction of alphabetic chars being Tamil => "ta"
+  langdetect_seed: 0                # for deterministic langdetect output
+  fallback_label: "other"
+
+split:
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  stratify_columns: ["label", "language"]
+  random_seed: 42
+
+output:
+  processed_dir: "data/processed"
+  formats: ["csv", "jsonl"]
+  filenames:
+    train: "train"
+    val: "val"
+    test: "test"
