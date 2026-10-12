@@ -1,0 +1,58 @@
+# Module 5 (single MLP + Focal Loss) configuration.
+#
+# This is the PyTorch implementation of Module 5, trained end-to-end
+# with an explicit train / validation / test loop: Focal Loss (handles
+# class imbalance directly in the training objective, rather than via
+# resampling), AdamW, a linear-warmup LR schedule, early stopping, and
+# checkpointing.
+#
+# A second, independent Module 5 implementation also exists
+# (`configs/classifier.yaml` + `scripts/train_classifier.py` +
+# `src/classifier/mlp_ensemble.py`): a bagging ensemble of
+# scikit-learn MLPs, each trained on a class-balanced subsample,
+# averaged at inference. Both satisfy the README's "MLP ensemble
+# (scikit-learn / torch)" tech-stack line; this file/config is the
+# single-model, torch + Focal Loss variant.
+
+input:
+  embeddings_dir: "data/embeddings_contrastive"
+  train_split: "train"
+  val_split: "val"
+  test_split: "test"
+
+model:
+  hidden_layer_sizes: [256, 128]
+  dropout: 0.3
+  num_classes: 2
+
+loss:
+  # Focal Loss (Lin et al., 2017), adapted here from its original
+  # object-detection setting to binary fake/real classification: it
+  # down-weights already-easy, confidently-correct examples (typically
+  # the majority class) so gradient signal concentrates on hard /
+  # minority examples, without resampling or discarding any data.
+  gamma: 2.0             # focusing parameter; higher = more down-weighting of easy examples
+  alpha: "auto"           # "auto" computes per-class weight inversely proportional to class
+                          # frequency in the training split; or supply an explicit
+                          # [weight_for_real, weight_for_fake] list to override
+
+optimizer:
+  name: "adamw"
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+
+scheduler:
+  name: "linear_warmup"
+  warmup_ratio: 0.1        # fraction of total steps spent linearly warming up from 0 to learning_rate
+
+training:
+  batch_size: 64
+  max_epochs: 50
+  early_stopping_patience: 5   # stop after this many epochs with no val-loss improvement
+  min_delta: 0.0001              # minimum val-loss improvement required to reset patience
+  seed: 42
+
+output:
+  checkpoint_dir: "models/classifiers"
+  best_checkpoint_name: "mlp_focal_best.pt"
+  last_checkpoint_name: "mlp_focal_last.pt"

@@ -1,0 +1,31 @@
+# Module 5 (MLP ensemble classifier) configuration.
+#
+# Trains N independent MLP classifiers, each on its own randomly
+# class-balanced (undersampled-majority) subsample of the training
+# embeddings, then averages their predicted probabilities at inference
+# -- mirroring the base paper's stacking-ensemble strategy for handling
+# extreme class imbalance without any single model overfitting to
+# whichever examples one particular undersampling draw happened to keep.
+
+input:
+  # Which embeddings to classify on. Default: Module 4's fine-tuned
+  # Contrast-XLMR embeddings. Point this at "data/embeddings" (Module 3's
+  # frozen pretrained-XLM-R embeddings) instead to run an ablation
+  # comparing "with vs. without contrastive fine-tuning".
+  embeddings_dir: "data/embeddings_contrastive"
+  train_split: "train"
+  val_split: "val"
+  test_split: "test"
+
+ensemble:
+  n_estimators: 7             # odd count avoids exact ties when averaging binary probabilities
+  hidden_layer_sizes: [256, 128]
+  activation: "relu"
+  learning_rate_init: 0.001
+  max_iter: 200
+  early_stopping: true         # sklearn's MLPClassifier holds out its own internal slice to stop early
+  random_state: 42              # base seed; estimator i uses random_state + i for its subsample + init
+
+output:
+  checkpoint_dir: "models/classifiers"
+  checkpoint_name: "mlp_ensemble.joblib"

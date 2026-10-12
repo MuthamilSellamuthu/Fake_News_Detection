@@ -1,0 +1,73 @@
+# Module 4 (Supervised SimCSE contrastive fine-tuning) configuration.
+#
+# Produces "Contrast-XLMR": the same XLM-RoBERTa checkpoint Module 3
+# used frozen, now fine-tuned with a supervised SimCSE / InfoNCE
+# objective so its embedding space pulls same-label texts together and
+# pushes opposite-label texts apart — the core idea of the base paper
+# this project builds on.
+#
+# Design note (read before changing label_column / pairing logic):
+# the base paper's original setup pairs a fact-check *claim* with its
+# *evidence* (claim = positive anchor pair, opposite-verdict evidence =
+# hard negative). Our Module 1/2 data does not have a separate
+# claim/evidence field — every row is a single document with a single
+# fake/real label. Module 4 therefore adapts the same InfoNCE objective
+# to label-supervised pairing instead: for each anchor row, the
+# positive is a *different* row sharing its label, and the hard
+# negative is a row with the opposite label. This is the standard
+# supervised-SimCSE/SupCon adaptation for plain classification labels
+# (Gao et al., 2021) and is a defensible substitute given the data we
+# actually collected — it is not the literal claim/evidence formulation
+# and should be described that way in any write-up.
+#
+# Pairing is done across languages, not within each language separately
+# (English and Tamil rows can be paired with each other) — this is
+# intentional: it is what makes the resulting space a *shared
+# multilingual* contrastive space rather than two separate per-language
+# ones, which is this project's whole point relative to the base paper.
+
+model:
+  # Start from the same pretrained checkpoint Module 3 used frozen.
+  # Fine-tuning here updates these weights (Module 3's copy is
+  # untouched — it never saves weights, only extracts embeddings).
+  name: "xlm-roberta-base"
+  max_sequence_length: 128
+
+training:
+  batch_size: 16          # x3 texts (anchor+positive+negative) per step -> 48 forward "rows"/step
+  epochs: 3
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1        # fraction of total steps spent linearly warming up LR
+  temperature: 0.05        # InfoNCE softmax temperature; lower = sharper, more punishing of near-positives
+  weight_decay: 0.01
+  max_grad_norm: 1.0       # gradient clipping, standard for transformer fine-tuning stability
+  seed: 42
+
+input:
+  processed_dir: "data/processed"
+  train_split: "train"
+  val_split: "val"
+  test_split: "test"
+  text_column: "clean_text"
+  label_column: "label"
+  id_column: "record_id"
+
+output:
+  checkpoint_dir: "models/contrastive"
+  save_best_only: false    # if true, only the best-val-loss checkpoint is kept; if false, every epoch is saved too
+  best_checkpoint_name: "contrast-xlmr-best"
+  last_checkpoint_name: "contrast-xlmr-last"
+
+  # After training, the fine-tuned (best-val-loss) encoder is used to
+  # generate and save the actual Contrast-XLMR embeddings for every
+  # split -- this is the "save learned embeddings" deliverable, distinct
+  # from the checkpoint above (which stores the encoder's *weights*, not
+  # its output vectors). Kept in its own directory, separate from
+  # Module 3's `data/embeddings/`, since those are frozen pretrained-
+  # XLM-R embeddings and these are the fine-tuned Contrast-XLMR ones —
+  # Module 5 should be explicit about which one it trains the
+  # classifier on.
+  embeddings_dir: "data/embeddings_contrastive"
+  embeddings_batch_size: 32
+  embeddings_compression: "gzip"
+  embeddings_compression_level: 4

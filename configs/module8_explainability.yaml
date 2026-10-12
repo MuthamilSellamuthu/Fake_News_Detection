@@ -1,0 +1,132 @@
+# Module 8 — Explainable AI
+#
+# A CONSTRAINT THAT SHAPES THE WHOLE MODULE: Module 4's classifier consumes
+# 768-dimensional XLM-R sentence embeddings, not tokens. Running SHAP directly
+# on it yields attributions over embedding dimensions, which are real but not
+# human-interpretable -- dimension 412 means nothing to a reader.
+#
+# Token-level explanation therefore requires the full text -> XLM-R -> mean-pool
+# -> CE-MLP path. Two methods are supported and are always labelled by what
+# they actually are:
+#
+#   occlusion  : mask a token, re-encode, measure the change in P(fake).
+#                Deterministic, model-agnostic, needs one forward pass per
+#                token, and is the DEFAULT.
+#   shap       : KernelSHAP over the embedding vector. Honest but reported as
+#                `shap_embedding_space`, never as token attribution.
+#
+# A fallback is never labelled "shap". `explanation_method` records the method
+# actually used for every record.
+
+module: 8
+name: explainable_ai
+
+inputs:
+  module7_root: outputs/module7
+  module7_config: configs/module7_integration.yaml
+  module6_config: configs/module6_retrieval_verification.yaml
+  processed_dir: datasets/processed
+  splits: {validation: validation.csv, test: test.csv}
+  embeddings_dir: embeddings
+  pooling: mean
+  module4_models_dir: models/module4
+  module4_checkpoint: ce_mlp_mean_uniform_seed42.pt
+  encoder: sentence-transformers/LaBSE      # must match Module 3's encoder path
+
+explanation:
+  primary_method: occlusion
+  fallback_method: occlusion
+  allow_shap_embedding_space: true
+  shap_label: shap_embedding_space          # never plain "shap"
+  occlusion_label: occlusion
+  mask_token: "[MASK]"
+  max_tokens_per_record: 128                # cost ceiling: one forward pass each
+  batch_size: 16
+  max_seq_length: 128
+  top_k_tokens: 10
+  deterministic: true
+  # Explanations are generated for a sample, not the whole split: occlusion is
+  # O(tokens) forward passes per record, so the full test split is infeasible
+  # on free Colab. The sample is deterministic and its size is reported.
+  sample:
+    validation: 200
+    test: 500
+    stratify_by: [language, gold_label]
+    seed: 42
+
+faithfulness:
+  deletion:
+    enabled: true
+    fractions: [0.1, 0.2, 0.3, 0.5]
+    # Remove the highest-attribution tokens; a faithful explanation should make
+    # P(fake) fall for a fake-predicted record.
+  insertion:
+    enabled: true
+    fractions: [0.1, 0.2, 0.3, 0.5]
+    # Start from an empty/masked input and add the highest-attribution tokens;
+    # a faithful explanation should recover the prediction quickly.
+  attribution_concentration:
+    enabled: true
+    top_k: [1, 3, 5, 10]
+    # Share of total |attribution| mass held by the top-k tokens.
+  stability:
+    enabled: true
+    n_repeats: 2
+    # Deterministic settings promise identical output; this checks the promise.
+  note: >
+    Each metric is defined independently. No single "explanation quality score"
+    is computed, because combining deletion, insertion, concentration and
+    stability into one number would hide which property actually failed.
+
+verification_explanation:
+  include_evidence_text: true
+  max_evidence_shown: 5
+  truncate_evidence_chars: 300
+  include_verifier_probabilities: true
+  include_retrieval_confidence: true
+
+combined:
+  # The decision sentence is generated from the actual numbers, never templated
+  # from an assumed conclusion.
+  contribution_breakdown: true
+  include_fusion_alpha: true
+  reason_from_values_only: true
+
+evaluation:
+  per_language: true
+  languages: [en, ta]
+  record_fields: [record_id, language, text, gold_label, predicted_label, p_fake,
+                  explanation_method, token_attributions, top_positive_tokens,
+                  top_negative_tokens, evidence, verification_probabilities,
+                  final_decision_reason, confidence]
+  report_token_counts: true
+  report_latency: true
+  report_failures: true
+
+leakage:
+  # Nothing in Module 8 is fitted, but the guard is explicit so a future change
+  # cannot quietly introduce tuning on test.
+  fit_split: validation
+  test_is_read_only: true
+  no_parameters_fitted: true
+
+output:
+  root: outputs/module8
+  subdirs: [explanations, metrics, error_analysis, manifests]
+  explanations_filename: "explanations_{split}.jsonl"
+  metrics_filename: explanation_metrics.json
+  summary_filename: explanation_summary.json
+  report_filename: module8_report.md
+
+reproducibility:
+  seed: 42
+  deterministic: true
+  record_checkpoint_hashes: true
+
+runtime:
+  device: auto
+  gpu_stages: [m8_02, m8_05]
+  cpu_stages: [m8_01, m8_03, m8_04, m8_06, m8_07]
+
+logging:
+  level: INFO

@@ -1,0 +1,178 @@
+# Module 6 — Evidence Retrieval + Fact Verification
+#
+# Reads Module 5's frozen corpus. Never writes to it.
+#
+# Values here deliberately DIVERGE from configs/module5_fact_verification.yaml
+# where free-Colab compute forces a reduction. Every divergence is recorded
+# under `compute_scope` with the original value, so the limitation is
+# reportable rather than hidden.
+
+module: 6
+name: evidence_retrieval_and_fact_verification
+
+# ------------------------------------------------------------------ inputs
+# Module 5 outputs. READ-ONLY. Module 6 must never open these for writing.
+inputs:
+  corpus_dir: datasets/fact_verification
+  claims_filename: claims.jsonl
+  evidence_filename: evidence.jsonl
+  splits_filename: claim_splits.json
+  datasets: [fever, x_fact]
+  module5_config: configs/module5_fact_verification.yaml
+
+# ------------------------------------------------------------- label spaces
+# FEVER and X-FACT are NOT the same task and are never merged or mapped.
+# FEVER is textual entailment against evidence; X-FACT is a fact-checker's
+# veracity verdict. Mapping "partly true/misleading" onto any FEVER class
+# would be a fabrication, so the two heads stay separate and are reported
+# separately. The encoder is shared so FEVER -> Tamil transfer is measurable.
+label_spaces:
+  fever:
+    task: entailment
+    labels: ["SUPPORTS", "REFUTES", "NOT ENOUGH INFO"]
+    source_field: label
+    role: pretraining
+  x_fact:
+    task: veracity
+    labels: ["false", "true", "partly true/misleading"]
+    source_field: label
+    role: transfer_target
+    note: >
+      Labels are preserved exactly as published by X-FACT. They are NOT
+      remapped to FEVER's label space. The Tamil subset (hf_config 'ta')
+      only; these are not overall X-FACT statistics.
+  mapping_between_spaces: false      # must stay false; asserted by tests
+
+# --------------------------------------------------------------- retrieval
+retrieval:
+  bi_encoder: sentence-transformers/LaBSE
+  alternative_bi_encoder: intfloat/multilingual-e5-base
+  embedding_dim: 768
+  normalize: true                   # required for IndexFlatIP == cosine
+  index: faiss_flat_ip
+  top_k_candidates: 50              # Module 5 config said 100 (see compute_scope)
+  encode_batch_size: 64
+  max_seq_length: 256
+  shard_size: 10000
+  evaluate_splits: [validation, test]
+
+bm25:
+  enabled: true
+  k1: 1.5
+  b: 0.75
+  top_k: 50
+  tokenizer: unicode_word           # Tamil-safe: no Latin-only assumptions
+
+# ---------------------------------------------------------------- reranking
+reranking:
+  cross_encoder: xlm-roberta-base
+  max_length: 256                   # Module 5 config said 512 (see compute_scope)
+  top_n_after_rerank: 5
+  batch_size: 32
+  rerank_splits: [validation, test]
+  train_subset_size: 20000          # stratified; documented, not silent
+  candidate_set_must_be_preserved: true   # asserted by tests
+
+# ----------------------------------------------------------------- verifier
+verifier:
+  encoder: xlm-roberta-base
+  max_length: 256                   # Module 5 config said 512
+  hidden_dim: 512
+  dropout: 0.1
+  epochs: 3                         # Module 5 config said 10
+  batch_size: 16
+  gradient_accumulation_steps: 2
+  learning_rate: 2.0e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  early_stopping_patience: 2
+  monitor: val_macro_f1
+  evidence_per_claim: 5
+  checkpoint_every_steps: 500
+  fever:
+    train_subset_size: 50000        # stratified from 228,090 (see compute_scope)
+    stratify_by: [label]
+  x_fact:
+    train_subset_size: null         # 1,096 claims: use all
+    freeze_encoder_layers: 0
+    reinitialise_head: true         # head is replaced, not reused
+
+# -------------------------------------------------------------- calibration
+calibration:
+  ece_bins: 10
+  temperature_scaling: true
+  fit_temperature_on: validation    # never on test
+  reliability_diagram: true
+
+# ---------------------------------------------------------------- evaluation
+evaluation:
+  retrieval_metrics: ["recall@1", "recall@5", "recall@10", "recall@50", "mrr", "ndcg@10"]
+  verification_metrics: ["accuracy", "precision_macro", "recall_macro", "macro_f1", "ece"]
+  ndcg_k: 10
+  per_language: true
+  languages: [en, ta]
+  per_dataset: true
+  test_evaluated_once: true
+  exclude_claims_without_gold_evidence: true
+  report_excluded_counts: true      # the 427 FEVER NEI claims must be counted
+
+# ---------------------------------------------------------------- ablations
+ablations:
+  bm25_vs_dense: true
+  top_k_values: [1, 5, 10, 20, 50]
+  claim_only_vs_claim_evidence: true
+  english_only_vs_multilingual_evidence: true
+  retrieval_only_vs_retrieval_rerank: true
+  oracle_gold_evidence: true
+
+# ----------------------------------------------------------- leakage control
+# Scope is delegated to Module 5's build_index_scope(); Module 6 only
+# translates permitted CLAIM indices into permitted EVIDENCE ids.
+leakage:
+  use_module5_index_scope: true
+  index_scope:
+    train: [train]
+    validation: [train, validation]
+    test: [train, validation, test]
+  assert_no_out_of_scope_evidence: true
+
+# ------------------------------------------------- documented compute scope
+# Free Colab, 0 compute units. Each reduction is recorded with the original.
+compute_scope:
+  reason: >
+    Free-tier Google Colab with no purchased compute units. The originally
+    configured pipeline was measured as infeasible: cross-encoder reranking
+    at top-100/seq-512 over all claims is ~26M forward passes (~60 h on a
+    T4), and verifier training at 228,090 claims x 10 epochs is ~12 h.
+  reductions:
+    - {item: top_k_candidates,        original: 100,    used: 50}
+    - {item: reranker_max_length,     original: 512,    used: 256}
+    - {item: verifier_max_length,     original: 512,    used: 256}
+    - {item: verifier_epochs,         original: 10,     used: 3}
+    - {item: fever_train_claims,      original: 228090, used: 50000}
+    - {item: rerank_train_subset,     original: "all",  used: 20000}
+  full_scale_results_claimed: false
+  must_document_in_report: true
+
+# ------------------------------------------------------------ reproducibility
+reproducibility:
+  seed: 42
+  seeds: [42, 43, 44]
+  deterministic: true
+
+runtime:
+  device: auto                      # notebook prints what it detected
+  use_mixed_precision: true
+  gpu_stages: [encode_evidence, encode_claims, rerank, train_verifier, evaluate_verifier]
+  cpu_stages: [build_index, bm25, retrieve, retrieval_metrics, ablations, verify_outputs]
+
+output:
+  root: outputs/module6
+  models_dir: models/module6
+  embeddings_dir: embeddings/module6
+  stages: [encode_evidence, build_index, encode_claims, retrieve, rerank,
+           verifier_training, evaluation, ablations, manifests]
+  report_filename: module6_report.md
+
+logging:
+  level: INFO

@@ -1,0 +1,147 @@
+# Module 4 — Supervised Contrastive Learning configuration.
+#
+# Same convention as Modules 1-3: every tunable value lives here, not
+# hardcoded in Python.
+#
+# Module 3's embeddings are a FROZEN, READ-ONLY baseline (verified
+# 18/18 on 2026-08-09). Nothing in this module writes to `embeddings/`
+# or `outputs/module3/`.
+
+input:
+  # Frozen Module 3 outputs. Read-only.
+  embeddings_dir: "embeddings"
+  processed_dir: "datasets/processed"
+  splits: ["train", "validation", "test"]
+  # Both pooled representations are evaluated (ablation 1). The winner
+  # is chosen on VALIDATION only; test is touched once, at the end.
+  pooling_strategies: ["cls", "mean"]
+  embedding_dim: 768
+  # Module 2's verified counts. Training refuses to start if the frozen
+  # embeddings disagree with these -- the same guard that caught a
+  # wrong-dataset substitution in Module 3.
+  expected_counts:
+    train: 48305
+    validation: 10351
+    test: 10352
+  expected_total: 69008
+  expected_tamil_rows: 5408
+
+model:
+  # Projection head g(.): 768 -> 512 -> 128, ReLU, L2-normalised output.
+  # Contrastive losses are defined on the unit hypersphere, so the
+  # normalisation is part of the architecture, not an afterthought.
+  projection_hidden_dim: 512
+  projection_output_dim: 128
+  activation: "relu"
+  dropout: 0.1
+  normalize_projection: true
+
+supcon:
+  # Temperature for the supervised contrastive loss (Khosla et al. 2020).
+  # 0.07 is the value used in the original paper; lower values sharpen
+  # the similarity distribution and emphasise hard positives/negatives.
+  temperature: 0.07
+  epochs: 30
+  batch_size: 256
+  learning_rate: 0.0005
+  weight_decay: 0.0001
+  optimizer: "adamw"
+  scheduler: "cosine"
+  warmup_epochs: 2
+  early_stopping_patience: 5
+  # Stage 1 selects on validation SupCon loss, never on test.
+  monitor: "val_supcon_loss"
+
+classifier:
+  # Stage 2: projection head frozen, linear classifier on the 128-d
+  # projections. This two-stage split is what makes the reported gain
+  # attributable to the learned representation rather than to extra
+  # classifier capacity.
+  epochs: 50
+  batch_size: 512
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  early_stopping_patience: 8
+  monitor: "val_macro_f1"
+
+sampling:
+  # PRIMARY strategy: language-aware batching.
+  #
+  # Why this is the core methodological contribution: the corpus is
+  # 12:1 English:Tamil (63,600 / 5,408). Under uniform sampling a
+  # batch of 256 carries ~20 Tamil rows, so a Tamil anchor rarely finds
+  # a same-label same-language positive, and the low-resource language
+  # -- the one this paper is about -- is under-represented in the
+  # learned geometry. Forcing a minimum Tamil fraction guarantees every
+  # anchor sees both same-language and cross-language positives.
+  strategy: "language_aware"
+  tamil_fraction: 0.25
+  # Oversampling Tamil means Tamil rows repeat within an epoch. This is
+  # deliberate and disclosed; `uniform` below is the ablation that
+  # measures what it buys.
+  replacement: true
+  ablation_strategies: ["language_aware", "uniform"]
+
+zero_shot:
+  # Train on English only, evaluate on the Tamil test set. Reported
+  # SEPARATELY from the multilingual results -- it answers a different
+  # question (does the shared XLM-R space transfer without any Tamil
+  # supervision?) and must not be blended into the headline numbers.
+  enabled: true
+  train_languages: ["en"]
+  eval_language: "ta"
+
+baselines:
+  # Without these the SupCon numbers are uninterpretable. The CE-MLP in
+  # particular has the SAME capacity as the projection head + linear
+  # classifier, so any difference is attributable to the objective
+  # rather than to parameter count.
+  majority_class: true
+  logistic_regression: true
+  mlp_cross_entropy: true
+  mlp_hidden_dims: [512, 128]
+  mlp_epochs: 50
+  mlp_learning_rate: 0.001
+
+evaluation:
+  metrics: ["accuracy", "precision", "recall", "macro_f1", "roc_auc"]
+  # Every metric is reported overall AND per language. An aggregate
+  # score can look strong while Tamil performance is poor; for a
+  # low-resource paper that distinction is the whole point.
+  per_language: true
+  languages: ["en", "ta"]
+  confusion_matrix: true
+  # Test is evaluated EXACTLY ONCE, after model selection on validation.
+  test_evaluated_once: true
+
+visualization:
+  enabled: true
+  method: "tsne"          # "tsne" | "umap"
+  sample_size: 3000       # per split; full t-SNE on 48k is impractical
+  perplexity: 30
+  random_state: 42
+
+reproducibility:
+  seed: 42
+  # Multiple seeds let the report distinguish a real improvement from
+  # run-to-run variance. Set to [42] for a single fast run.
+  seeds: [42, 43, 44]
+  deterministic: true
+
+runtime:
+  device: "auto"
+  use_mixed_precision: true
+  num_workers: 2
+
+output:
+  models_dir: "models/module4"
+  reports_dir: "outputs/module4"
+  figures_dir: "reports/figures/module4"
+  history_filename: "training_history.json"
+  metrics_filename: "evaluation_metrics.json"
+  ablation_filename: "ablation_results.json"
+  report_filename: "module4_report.md"
+
+logging:
+  log_every_n_epochs: 1
+  log_filename: "module4_training.log"

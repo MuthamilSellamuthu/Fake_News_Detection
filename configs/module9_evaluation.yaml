@@ -1,0 +1,129 @@
+# Module 9 — Final Performance Evaluation
+#
+# Collects measured results from Modules 4, 6, 7 and 8 and produces the paper's
+# tables, figures, statistics and reproducibility record.
+#
+# Module 9 COMPUTES NOTHING NEW about the models. It reads what earlier modules
+# actually measured. If an experiment was not run, its row is "unavailable" --
+# never imputed, never interpolated.
+
+module: 9
+name: final_performance_evaluation
+
+inputs:
+  module4_reports: outputs/module4
+  module6_root: outputs/module6
+  module7_root: outputs/module7
+  module8_root: outputs/module8
+  configs:
+    module4: configs/module4_contrastive.yaml
+    module5: configs/module5_fact_verification.yaml
+    module6: configs/module6_retrieval_verification.yaml
+    module7: configs/module7_integration.yaml
+    module8: configs/module8_explainability.yaml
+
+research_questions:
+  RQ1: "Does the multilingual classifier detect fake news effectively?"
+  RQ2: "Does evidence retrieval and fact verification improve classification?"
+  RQ3: "Does the integrated system improve Tamil performance?"
+  RQ4: "How much does retrieval quality affect final classification?"
+  RQ5: "How stable are results across English and Tamil?"
+  RQ6: "Are the explanations faithful and consistent?"
+
+# Only systems whose experiment actually exists are reported.
+systems:
+  classifier_only: {source: module7, stage: classifier_only, required: true}
+  verifier_only: {source: module7, stage: verifier_only, required: false}
+  integrated_weighted: {source: module7, stage: integrated, required: true}
+  classifier_plus_retrieval: {source: module7, stage: classifier_plus_retrieval, required: false}
+  meta_classifier_fusion: {source: module7, stage: meta_classifier, required: false}
+
+metrics:
+  classification: [accuracy, precision, recall, f1, macro_f1, roc_auc, brier_loss]
+  retrieval: ["recall@1", "recall@5", "recall@10", "recall@50", mrr, "ndcg@10"]
+  verification: [accuracy, macro_f1, precision_macro, recall_macro]
+  explainability: [deletion, insertion, attribution_concentration, stability,
+                   failure_rate]
+  primary: macro_f1
+  per_language: true
+  languages: [en, ta]
+
+statistics:
+  paired_test: mcnemar
+  min_discordant_pairs: 10
+  multiple_comparison_correction: holm
+  alpha: 0.05
+  bootstrap:
+    enabled: true
+    n_resamples: 1000
+    confidence_level: 0.95
+    seed: 42
+  comparisons:
+    - [classifier_only, integrated_weighted]
+    - [classifier_only, verifier_only]
+    - [verifier_only, integrated_weighted]
+    - [integrated_weighted, meta_classifier_fusion]
+
+robustness:
+  min_slice_size: 20
+  language: true
+  class_balance: true
+  retriever: true
+  evidence_availability: true
+  confidence:
+    enabled: true
+    high_confidence_threshold: 0.8
+  error_breakdown: true
+
+figures:
+  enabled: true
+  dpi: 200
+  format: png
+  deterministic: true
+  planned: [model_comparison, language_macro_f1, retrieval_recall_at_k,
+            confusion_matrices, reliability_curves, ablation_comparison,
+            error_distribution, explanation_faithfulness]
+  skip_if_data_missing: true
+
+output:
+  root: outputs/module9
+  tables_dir: outputs/module9/tables
+  figures_dir: outputs/module9/figures
+  report: final_research_report.json
+  summary: final_results_summary.json
+  reproducibility: reproducibility_report.json
+  tables: [final_classification_metrics, language_comparison, retrieval_comparison,
+           verification_metrics, ablation_results, statistical_tests,
+           robustness_results, explainability_results]
+
+leakage_audit:
+  # Module 9 re-checks the guarantees rather than trusting earlier manifests.
+  checks:
+    - fusion_parameters_fitted_on_validation
+    - calibration_temperature_fitted_on_validation
+    - meta_classifier_fitted_on_validation
+    - threshold_selected_on_validation
+    - test_labels_never_used_for_fitting
+    - explanation_parameters_not_fitted
+
+reproducibility:
+  seed: 42
+  record_versions: true
+  record_hashes: true
+  artefacts_to_hash:
+    - configs/module7_integration.yaml
+    - configs/module8_explainability.yaml
+    - configs/module9_evaluation.yaml
+    - outputs/module7/validation/fusion_parameters.json
+    - datasets/processed/test.csv
+    - datasets/processed/validation.csv
+
+reporting:
+  claim_policy: >
+    No sentence may assert superiority unless the measured difference is
+    present AND the statistical test supports it after Holm correction.
+    Negative and mixed results are reported with equal prominence.
+  result_kinds: [measured, derived, statistical_inference, limitation]
+
+logging:
+  level: INFO

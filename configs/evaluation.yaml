@@ -1,0 +1,56 @@
+# Module 6 (Performance Evaluation) configuration.
+#
+# Evaluates a trained classifier (either Module 5 variant) on the held-out
+# test split: standard classification metrics, embedding clustering
+# quality, nearest-neighbor retrieval quality, robustness across
+# synthetic imbalance ratios, and a language/source fairness audit.
+# Nothing here retrains or modifies the classifier or encoder.
+
+input:
+  embeddings_dir: "data/embeddings_contrastive"
+  processed_dir: "data/processed"
+  test_split: "test"
+
+  # Which Module 5 classifier to evaluate:
+  #   "torch_focal"      -> src/classifier/torch_mlp.py checkpoint
+  #   "sklearn_ensemble"  -> src/classifier/mlp_ensemble.py checkpoint
+  classifier_type: "torch_focal"
+  torch_checkpoint: "models/classifiers/mlp_focal_best.pt"
+  sklearn_checkpoint: "models/classifiers/mlp_ensemble.joblib"
+
+clustering:
+  # KMeans on the raw embeddings, then check how well the resulting
+  # clusters line up with the true fake/real label (the clustering
+  # algorithm never sees the label) -- "topic alignment" in README's
+  # Module 6 description.
+  n_clusters: 2
+  random_state: 42
+
+retrieval:
+  # For each test-split embedding, rank the *train*-split embeddings by
+  # cosine similarity and ask "how quickly do we hit a same-label
+  # neighbor?" -- HR@k / MRR@k. Using train (not test) as the reference
+  # pool avoids the trivial "a point is its own nearest neighbor" case.
+  reference_split: "train"
+  k_values: [1, 5, 10]
+
+imbalance_ablation:
+  # Re-evaluate the (already-trained, unmodified) classifier after
+  # randomly subsampling the test set to each target fake-class
+  # fraction below -- rows are only ever removed, never duplicated or
+  # synthesized, per this project's standing rule against fabricating
+  # data. Shows how much reported performance depends on the test
+  # set's own class balance vs. the model itself.
+  fake_ratios: [0.5, 0.6, 0.7, 0.8, 0.9]
+  seed: 42
+
+fairness:
+  # Slice classification metrics by these columns (must exist in
+  # data/processed/test.csv) to check the classifier isn't quietly
+  # performing worse on Tamil / specific sources than on English --
+  # directly relevant given this project's low-resource-language focus.
+  group_columns: ["language", "source"]
+
+output:
+  report_dir: "reports/results"
+  report_name: "module6_evaluation_report.json"

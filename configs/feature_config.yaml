@@ -1,0 +1,82 @@
+# Module 3 — multilingual feature extraction configuration.
+#
+# Same convention as configs/module1_validation.yaml and
+# configs/module2_preprocessing.yaml: every tunable value lives here,
+# not hardcoded in Python, so the pipeline can be re-tuned (or pointed
+# at a different checkpoint / device) without touching code.
+
+input:
+  # Module 2's finalized (Version B) splits — the ONLY input this
+  # module reads. Module 2 is not re-run, re-cleaned, or modified here.
+  processed_dir: "datasets/processed"
+  train_filename: "train.csv"
+  val_filename: "validation.csv"
+  test_filename: "test.csv"
+  text_column: "text"
+  label_column: "label"
+  language_column: "language"
+  id_column: "record_id"
+
+model:
+  # Any XLM-RoBERTa checkpoint on the Hugging Face Hub. "xlm-roberta-base"
+  # is the one specified for this project (see docs/module3_completion_report.md
+  # §0 for why base over mBERT). Swapping to "xlm-roberta-large" only
+  # requires changing this string — nothing else in the pipeline is
+  # hardcoded to base's 768-dim hidden size, it's always read from the
+  # loaded model's own config.
+  name: "xlm-roberta-base"
+  # Optional local path (e.g. a directory containing config.json,
+  # pytorch_model.bin/model.safetensors, sentencepiece.bpe.model,
+  # tokenizer files) to load from disk instead of the Hub. Leave null to
+  # always load `name` from the Hub. Useful in network-restricted
+  # environments where the model has been pre-downloaded and copied in.
+  local_path: null
+  # "auto" picks CUDA if available, else CPU. Explicit "cuda"/"cpu"/
+  # "cuda:0" are also accepted.
+  device: "auto"
+  # Automatic mixed precision (torch.autocast) on CUDA only — halves
+  # memory and roughly doubles throughput on a GPU with tensor cores
+  # (T4/V100/A100, all of Colab's free/paid tiers). Silently ignored on
+  # CPU, where autocast provides no benefit for this workload.
+  use_mixed_precision: true
+
+tokenization:
+  # Sequences longer than this are truncated; XLM-R's absolute position
+  # embeddings support up to 512. Tamil documents (mean ~16 words) are
+  # almost never affected; English documents (mean ~554 words, max
+  # 24,235) frequently are — this is a disclosed, known tradeoff, not an
+  # oversight (see docs/module3_completion_report.md §6).
+  max_length: 512
+  # Dynamic padding: pad each batch to its own longest sequence, not
+  # always to max_length. Saves substantial compute on short-text
+  # (mostly Tamil) batches.
+  padding: "longest"
+  truncation: true
+
+extraction:
+  batch_size: 32
+  # Which pooled representations to compute and save. Both are cheap to
+  # compute in the same forward pass (they read the same last_hidden_state),
+  # so both are produced by default rather than forcing a re-run to get
+  # the other one later.
+  pooling_strategies: ["cls", "mean"]
+  # L2-normalize each pooled vector to unit length before saving.
+  # Required for Module 4's supervised contrastive loss, which is
+  # defined on the unit hypersphere (cosine similarity == dot product
+  # of normalized vectors).
+  normalize_embeddings: true
+  # Save a checkpoint file every N batches so a long run can resume
+  # instead of restarting from batch 0 after an interruption.
+  checkpoint_every_n_batches: 20
+
+output:
+  embeddings_dir: "embeddings"
+  reports_dir: "outputs/module3"
+  statistics_filename: "feature_statistics.json"
+  report_filename: "feature_report.md"
+  # Storage formats to write per split/pooling combination.
+  save_numpy: true
+  save_torch: true
+
+logging:
+  progress_every_n_batches: 5

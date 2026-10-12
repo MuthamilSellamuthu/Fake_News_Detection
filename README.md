@@ -4,7 +4,7 @@ Final Year B.E. (Computer Science) project — target venue: IEEE / Springer.
 
 **Title:** Explainable Multilingual Fake News Detection using XLM-RoBERTa, Supervised SimCSE, Fact Verification and Explainable AI for Low-Resource Languages
 
-**Status:** Design phase — architecture, folder structure, and dependencies defined. No model or application code has been implemented yet.
+**Status:** Module 1 (dataset collection, validation, standardization) and Module 2 (preprocessing) are both **complete**. Module 1 produced 69,089 rows (63,672 English, 5,417 Tamil; see `docs/module1_completion_report.md`). Module 2 cleaned, verified, and split it into a reproducible 48,009/10,287/10,288 train/validation/test split (68,584 rows after quality filtering; see `docs/module2_completion_report.md`). See `docs/module1_overview.md` and `RESEARCH_ROADMAP.md` for the broader plan. Module 3 has not been started — awaiting explicit approval. A prior implementation of Modules 1–6 exists under the legacy `data/` and `src/data/` paths (superseded by this rebuild; see the note in `.gitignore`).
 
 ---
 
@@ -81,40 +81,41 @@ Flask Web Application
 ## 4. Folder Structure
 
 ```
-fake-news-detection-xlmr/
+Fake_News_Detection/
 ├── README.md
-├── requirements.txt
-├── configs/                    # YAML configs: hyperparameters, paths, thresholds
-├── data/
-│   ├── raw/                    # untouched source datasets
-│   ├── interim/                # cleaned but not yet paired
-│   ├── processed/               # contrastive pairs, train/val/test splits
-│   └── external/                # third-party reference corpora
-├── notebooks/                   # EDA and reporting notebooks only
+├── RESEARCH_ROADMAP.md          # full 9-task research plan (analysis, architecture, roadmap)
+├── requirements.txt              # scoped to the current module; grows one module at a time
+├── .gitignore
+├── configs/                       # YAML configs: sources, hyperparameters, thresholds
+├── datasets/
+│   ├── raw/
+│   │   ├── english/                # WELFake, ISOT — untouched source files
+│   │   └── tamil/                  # BOOM Tamil, Daily Thanthi, etc. — untouched source files
+│   └── processed/                  # Module 1 output: deduplicated, language-tagged, label-standardized
+├── notebooks/                     # EDA, reporting, and the Colab mirror notebook
 ├── src/
-│   ├── data/                    # loading, cleaning, pair construction, filtering
-│   ├── embeddings/              # XLM-RoBERTa encoder wrapper
-│   ├── contrastive/              # supervised SimCSE model, loss, training loop
-│   ├── classifier/               # MLP + stacking ensemble
-│   ├── fact_verification/        # Sentence-BERT retriever, cosine similarity verification
-│   ├── explainability/           # SHAP explainer
-│   ├── evaluation/               # metrics, error analysis, fairness audit
-│   └── utils/                    # logging, config loading, seeding
-├── app/                          # Flask web application
+│   ├── data_collection/            # Module 1: one collector class per source + shared base class
+│   ├── preprocessing/              # Module 2 (not yet implemented under this structure)
+│   └── utils/                      # logging, config loading
+├── logs/                           # timestamped per-run log files
+├── docs/                           # module-level documentation (scope, rationale, known limitations)
+├── app/                            # Flask web application
 │   ├── templates/
 │   └── static/
-├── models/                       # trained checkpoints (git-ignored)
-│   ├── contrastive/
-│   ├── classifiers/
-│   └── checkpoints/
+├── models/                         # trained checkpoints (git-ignored)
+├── outputs/                        # run artifacts: stats reports, validation reports
 ├── reports/
 │   ├── figures/
 │   └── results/
-├── tests/                        # unit tests mirroring src/
-└── scripts/                      # orchestration entrypoints (train, evaluate, run app)
+├── tests/                          # unit tests mirroring src/
+└── scripts/                        # orchestration entrypoints
+
+Legacy (prior implementation, superseded by the above — see .gitignore note):
+├── data/                           # old data/raw, data/processed
+└── src/data/                       # old collectors + Module 2 preprocessing code
 ```
 
-Each directory contains its own `README.md` explaining its contents in more detail. This structure keeps data, modeling code, trained artifacts, and the serving layer independently swappable — e.g., the encoder or classifier can be upgraded without touching `app/` or `fact_verification/`.
+Each directory contains its own documentation explaining its contents in more detail (`docs/` for module-level rationale, per-folder `README.md` where present). This structure keeps data, collection code, and later pipeline stages independently swappable.
 
 ---
 
@@ -142,17 +143,62 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-(No entrypoint scripts exist yet — this section will be expanded once training/evaluation/app scripts are implemented.)
+### Running Module 1 locally
+
+```bash
+# Step 1 — English collectors (WELFake, ISOT)
+python scripts/collect_english.py --sources welfake isot
+
+# Step 2 — Tamil collectors (BOOM Tamil, Daily Thanthi, + best-effort others)
+python scripts/collect_tamil.py --all
+# or a single source, e.g.: python scripts/collect_tamil.py --sources dailythanthi_sitemap
+
+# Step 2b — AAnirudh07 Tamil headlines corpus (5,273 pre-labeled rows; the
+# single biggest lever on Tamil volume — see docs/module1_overview.md)
+python scripts/collect_tamil.py --sources aanirudh_headlines
+
+# Step 3 — Validation, deduplication, language ID, label standardization, stats
+python scripts/validate_and_standardize.py
+```
+
+Outputs: raw files under `datasets/raw/`, the standardized dataset under
+`datasets/processed/module1_dataset.{csv,jsonl}`, reports under `outputs/module1/`,
+and a full run log under `logs/run_<timestamp>.log`.
+
+### Running Module 1 in Google Colab
+
+Open `notebooks/module1_colab.ipynb` in Colab after uploading/syncing this project
+folder to Google Drive (`My Drive/Fake_News_Detection` by default — see the
+notebook's first cell to change the path). Run the cells in order; nothing executes
+automatically on open. See `docs/module1_completion_report.md` §7 for details.
+
+### Running Module 2 locally
+
+```bash
+python scripts/preprocess_dataset.py
+```
+
+Reads `datasets/processed/module1_dataset.csv`, writes
+`datasets/processed/cleaned_dataset.{csv,jsonl}` and
+`datasets/processed/{train,validation,test}.csv`, plus
+`outputs/module2/{preprocessing_statistics.json,preprocessing_report.md,preprocessing_config.yaml,preprocessing.log}`.
+
+### Running Module 2 in Google Colab
+
+Open `notebooks/module2_colab.ipynb` (same Drive folder as Module 1). It checks
+that Module 1's output is present, then runs the same pipeline as the local
+script. See `docs/module2_completion_report.md` for the full verification report.
 
 ---
 
 ## 7. Roadmap
 
-- [ ] Finalize dataset selection and licensing check
-- [ ] Implement `src/data` preprocessing + filtering
-- [ ] Implement `src/embeddings` + `src/contrastive` (Contrast-XLMR training)
-- [ ] Implement `src/classifier` ensemble
-- [ ] Implement `src/evaluation` (classification/clustering/retrieval/fairness)
+- [x] Finalize dataset selection and licensing check
+- [x] Implement `src/data` preprocessing + filtering
+- [x] Implement `src/embeddings` (frozen XLM-RoBERTa contextual embeddings, HDF5 storage)
+- [x] Implement `src/contrastive` (Supervised SimCSE fine-tuning -> Contrast-XLMR)
+- [x] Implement `src/classifier` ensemble
+- [x] Implement `src/evaluation` (classification/clustering/retrieval/fairness)
 - [ ] Implement `src/fact_verification`
 - [ ] Implement `src/explainability`
 - [ ] Implement `app/` (Flask)

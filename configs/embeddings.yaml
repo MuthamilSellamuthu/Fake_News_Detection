@@ -1,0 +1,58 @@
+# Module 3 (XLM-RoBERTa embedding extraction) configuration.
+#
+# This module only does frozen feature extraction: load pretrained
+# XLM-RoBERTa, tokenize with its SentencePiece tokenizer, run a forward
+# pass, pool the contextual token embeddings into one vector per text,
+# and store the result. No weights are updated here (no training, no
+# fine-tuning, no classification head) — that begins in Module 4
+# (Supervised SimCSE contrastive fine-tuning) and Module 5 (MLP
+# classifier), which consume the embeddings this module produces.
+
+model:
+  # "xlm-roberta-base": 12 layers, 768 hidden dim, 270M params, 250,002
+  # SentencePiece vocab entries covering 100 languages including Tamil.
+  # Swap to "xlm-roberta-large" (24 layers, 1024 hidden dim, 550M params)
+  # for higher-quality embeddings if compute allows — nothing else in
+  # this module needs to change, since hidden_size is read from the
+  # loaded model's config at runtime.
+  name: "xlm-roberta-base"
+
+  # Sequence length news headlines/bodies are truncated/padded to.
+  # 128 covers the vast majority of a title + first few sentences of
+  # body text; raise this (e.g. 256) if you want more of the article
+  # body represented, at a roughly linear increase in encode time.
+  max_sequence_length: 128
+
+  # How the per-token contextual embeddings become one sentence vector:
+  #   "mean" — average token embeddings, weighted by the attention mask
+  #            so padding tokens contribute nothing. Recommended default
+  #            for a *frozen*, not-yet-fine-tuned encoder (see
+  #            src/embeddings/xlmr_encoder.py docstring for why).
+  #   "cls"  — use the <s> token's embedding only (XLM-R/RoBERTa's
+  #            equivalent of BERT's [CLS]).
+  pooling_strategy: "mean"
+
+  # "auto" picks cuda if available, else cpu, at runtime.
+  device: "auto"
+
+batch_size: 32
+
+input:
+  processed_dir: "data/processed"
+  splits: ["train", "val", "test"]
+  text_column: "clean_text"
+  id_column: "record_id"
+  label_column: "label"
+  language_column: "language"
+
+output:
+  embeddings_dir: "data/embeddings"
+  # HDF5: supports resizable/chunked datasets, so embeddings can be
+  # written incrementally batch-by-batch without holding the full split
+  # in memory, and downstream code can read back arbitrary slices
+  # without loading the whole file (important once Tamil volume grows
+  # and English is already 60k+ rows).
+  format: "hdf5"
+  compression: "gzip"
+  compression_level: 4
+  dtype: "float32"

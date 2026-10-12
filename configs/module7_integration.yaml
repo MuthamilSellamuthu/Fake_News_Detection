@@ -1,0 +1,167 @@
+# Module 7 — Integrated Fake News Decision System
+#
+# Fuses Module 4's fake/real classifier with Module 6's evidence retrieval and
+# fact verification, then evaluates the combination overall and per language.
+#
+# LEAKAGE CONTROL IS THE CENTRAL CONSTRAINT OF THIS MODULE.
+# Every tunable parameter -- fusion weight, decision threshold, calibration
+# temperature, meta-classifier coefficients -- is fitted on the Module 2
+# VALIDATION split only. The test split is read once, with those parameters
+# frozen, and `m7_09_verify_outputs.py` recomputes the test predictions from the
+# stored parameters to prove nothing was tuned on it.
+
+module: 7
+name: integrated_fake_news_decision
+
+# ------------------------------------------------------------------ inputs
+inputs:
+  # Module 2 (frozen): gold fake/real labels and language per record.
+  processed_dir: datasets/processed
+  splits: {validation: validation.csv, test: test.csv}
+
+  # Module 3 (frozen): the embeddings Module 4 was trained on.
+  embeddings_dir: embeddings
+  pooling: mean                      # Module 4's selected pooling
+
+  # Module 4 (frozen): the selected checkpoint. mean + uniform + CE-MLP was
+  # chosen on validation macro-F1; see outputs/module4/ablation_results.json.
+  module4_models_dir: models/module4
+  module4_checkpoint: ce_mlp_mean_uniform_seed42.pt
+  module4_reports_dir: outputs/module4
+  module4_input_dim: 768
+  module4_hidden_dims: [512, 128]
+  module4_n_classes: 2
+  module4_dropout: 0.1               # inference uses eval(); recorded for fidelity
+
+  # Module 5 (frozen): the evidence pools claims are retrieved against.
+  corpus_dir: datasets/fact_verification
+  evidence_datasets: {en: fever, ta: x_fact}
+
+  # Module 6 (partial): verifier checkpoints. Stage 6 not yet complete.
+  module6_models_dir: models/module6
+  module6_config: configs/module6_retrieval_verification.yaml
+
+# --------------------------------------------------- claim selection (reuse)
+# src/fact_verification/claim_selection.py was written for THIS corpus (its
+# rule was derived from an audit of all 69,008 rows). It is reused unchanged;
+# Module 7 does not implement a second claim selector.
+claim_selection:
+  dataset_tag: project
+  reuse_module5_implementation: true
+
+# ---------------------------------------------------------------- retrieval
+# Module 6 never retrieved for project articles -- only for FEVER/X-FACT
+# claims -- so Module 7 runs its own retrieval and, unlike m6_04, PERSISTS the
+# scores because fusion may use them.
+retrieval:
+  retrievers: [dense, bm25]
+  primary: bm25                      # measured: BM25 > dense on X-FACT (R@5 0.671 vs 0.535)
+  top_k: 10
+  phase: test                        # index scope for a read-only corpus
+  encode_batch_size: 8
+  max_seq_length: 128
+  shard_size: 500
+  num_threads: 2
+  min_available_mb: 1200
+  persist_scores: true
+  # Score ranges are NOT comparable and are never summed directly:
+  #   dense = IndexFlatIP over L2-normalised vectors -> cosine in [-1, 1]
+  #   bm25  = Okapi BM25, unbounded >= 0
+  # Both are converted to a per-query rank-normalised confidence in [0, 1].
+  score_normalisation: rank_normalised_per_query
+
+# ------------------------------------------------------------------ fusion
+fusion:
+  method: calibrated_weighted        # PRIMARY
+  # P_fake_verifier = 0.5 + 0.5 * (P_refute - P_support)
+  #   -> 1.0 when the verifier fully refutes the claim (evidence of fakeness)
+  #   -> 0.0 when it fully supports it
+  #   -> 0.5 when uninformative, which is exactly what NOT ENOUGH INFO means.
+  # This keeps NEI neutral instead of letting it push the decision either way.
+  verifier_to_fake_prob: symmetric_refute_minus_support
+  fever_label_roles: {fake: REFUTES, real: SUPPORTS, neutral: NOT ENOUGH INFO}
+  x_fact_label_roles: {fake: "false", real: "true", neutral: "partly true/misleading"}
+
+  # P_final = alpha * P_fake(module4) + (1 - alpha) * P_fake(verifier)
+  alpha_grid: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+               0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0]
+  threshold_grid_start: 0.05
+  threshold_grid_stop: 0.95
+  threshold_grid_step: 0.01
+  select_on: macro_f1
+  fit_split: validation              # NEVER test
+  # A record with no verifier output falls back to alpha = 1 (classifier only)
+  # and is counted. Silently imputing 0.5 would fabricate a verdict.
+  missing_verifier_policy: classifier_only
+  missing_evidence_policy: classifier_only
+
+calibration:
+  temperature_scaling: true
+  fit_on: validation                 # fit_temperature() refuses "test"
+  ece_bins: 10
+
+# -------------------------------------------------------------- ablations
+ablations:
+  classifier_only: true              # A - Module 4 alone
+  verifier_only: true                # B - verifier verdict alone
+  integrated: true                   # C - the fusion
+  classifier_plus_retrieval: true    # D - isolates retrieval from verification
+  learned_meta_classifier: true      # secondary; logistic regression
+  meta_classifier:
+    features: [p_fake_m4, p_supports, p_refutes, p_nei, retrieval_confidence,
+               has_evidence]
+    model: logistic_regression
+    fit_split: validation
+    min_records_required: 200        # below this, report omission instead of forcing
+    cross_validation_folds: 5
+
+# ------------------------------------------------------------- evaluation
+evaluation:
+  metrics: [accuracy, precision, recall, f1, macro_f1, roc_auc, pr_auc,
+            brier_loss, ece]
+  per_language: true
+  languages: [en, ta]
+  confusion_matrix: true
+  test_evaluated_once: true
+  statistical_tests:
+    enabled: true
+    paired_test: mcnemar             # paired on identical records
+    bootstrap_ci: true
+    bootstrap_samples: 1000
+    alpha: 0.05
+    min_discordant_pairs: 10         # below this McNemar is not reportable
+
+error_analysis:
+  categories: [both_correct, classifier_only_correct, verifier_only_correct,
+               both_wrong, fusion_fixed_classifier, fusion_broke_classifier]
+  max_examples_per_category: 25
+  include_fields: [record_id, language, gold_label, claim_text,
+                   module4_prediction, module4_p_fake, evidence_ids,
+                   verifier_verdict, verifier_probs, retrieval_confidence,
+                   fused_p_fake, final_prediction, category]
+  truncate_text_chars: 300           # keep reports readable, no full articles
+
+# ---------------------------------------------------------------- outputs
+output:
+  root: outputs/module7
+  subdirs: [module4_predictions, claims, retrieval, verification, validation,
+            test, ablations, error_analysis, language_analysis, calibration,
+            manifests]
+  report_filename: module7_report.md
+  fusion_params_filename: fusion_parameters.json
+
+# --------------------------------------------------------- reproducibility
+reproducibility:
+  seed: 42
+  deterministic: true
+  record_checkpoint_hashes: true
+  record_input_manifests: true
+  record_runtime_info: true
+
+runtime:
+  device: auto
+  cpu_stages: [m7_01, m7_04, m7_05, m7_06, m7_07, m7_08, m7_09]
+  gpu_stages: [m7_02, m7_03]
+
+logging:
+  level: INFO

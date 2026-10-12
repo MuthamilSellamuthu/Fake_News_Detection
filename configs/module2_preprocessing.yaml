@@ -1,0 +1,117 @@
+# Module 2 — preprocessing pipeline configuration.
+#
+# Every threshold/flag used by src/preprocessing/*.py lives here (data,
+# not hardcoded in Python) so the pipeline can be re-tuned without
+# touching code — same convention as configs/module1_validation.yaml.
+
+input:
+  # Module 1's output — the single unified, standardized-but-uncleaned
+  # dataset this pipeline reads from. Never written to.
+  path: "datasets/processed/module1_dataset.csv"
+
+cleaning:
+  remove_html: true
+  remove_urls: true
+  # Unicode normalization form. NFC (canonical composition) is the
+  # Tamil-safe choice: it composes a base consonant + combining vowel
+  # sign into their canonical sequence without altering meaning or
+  # rendering. NFKD/NFKC ("compatibility" forms) are deliberately NOT
+  # used — they can collapse visually-distinct Tamil characters that
+  # are linguistically different, which NFC does not do.
+  unicode_form: "NFC"
+  remove_zero_width_chars: true
+  collapse_whitespace: true
+  # Lowercasing is applied to English rows only. Tamil has no case
+  # distinction, so lowercasing Tamil text is a guaranteed no-op at
+  # best — applying a case-folding routine to a script that doesn't
+  # have case is unnecessary surface area for a Unicode library bug,
+  # so it is explicitly skipped rather than "harmlessly" applied.
+  lowercase_english: true
+  strip_control_chars: true
+
+language_verification:
+  # Ratio = (Tamil-block codepoints) / (non-whitespace codepoints).
+  # Deliberately NOT (Tamil-block codepoints) / (regex "\w" alphabetic
+  # codepoints) as Module 1's language_identification.py uses — that
+  # formula can exceed 1.0 because Python's Unicode \w under-counts
+  # Tamil combining vowel signs relative to the Tamil-block character
+  # class, which does count them (confirmed against the real Module 1
+  # output: several hundred Tamil rows measured ratio > 1.0 under the
+  # old formula). Using non-whitespace-character-count as the
+  # denominator instead guarantees the ratio is mathematically bounded
+  # in [0, 1], since the numerator is a subset of the denominator by
+  # construction.
+  tamil_ratio_threshold: 0.3
+  # If a row's stored `language` tag disagrees with what this
+  # corrected formula would assign, it's flagged in the quality report
+  # rather than silently overwritten — see docs/module2_overview.md.
+
+label_verification:
+  valid_labels: [0, 1]
+
+document_length:
+  # Language-aware minimum word count ("Version B", adopted after a
+  # dedicated review — see docs/module2_short_document_review.md for
+  # the full analysis). A uniform threshold of 5 words ("Version A")
+  # removed 495 rows: 69 English (manually confirmed as genuine noise —
+  # empty/near-empty WELFake rows, stray comment fragments like
+  # "horseshit", "ludicrous...") and 426 Tamil (manually confirmed as
+  # ~99.5% legitimate, coherent news headlines — e.g. "பில்கேட்ஸின்
+  # தந்தை காலமானார்" / "Bill Gates' father passed away" — that only
+  # measured "short" because Tamil is agglutinative and Tamil headlines
+  # are conventionally terse; a 3-4 word Tamil headline carries
+  # comparable information to a longer English sentence). Applying an
+  # English-tuned threshold to Tamil was disproportionately destroying
+  # an already-scarce resource: 426 of 5,416 Tamil rows (7.9%) vs. 69 of
+  # 63,673 English rows (0.1%). Tamil's threshold is lowered to 2 words,
+  # which keeps every legitimate headline found in review while still
+  # dropping genuinely uninformative single-word entries (e.g. a lone
+  # "பாப்கார்ன்" / "Popcorn").
+  min_word_count:
+    en: 5
+    ta: 2
+  # Rows at/above this percentile of char length are flagged as
+  # extreme-length outliers in the report (not silently dropped —
+  # truncation belongs to Module 3's tokenizer, not here).
+  extreme_length_percentile: 99.5
+
+duplicate_verification:
+  # Re-run on `text` *after* cleaning/normalization, since Module 1's
+  # own dedup ran on raw, pre-normalization fields and demonstrably
+  # missed cases where only whitespace differed (see
+  # docs/module2_preprocessing_analysis.md).
+  subset: ["text"]
+
+quality_checks:
+  # Hard assertions the pipeline runs on the final cleaned dataset
+  # before writing it out. A failure here stops the run rather than
+  # silently shipping a broken file.
+  require_no_null_text: true
+  require_no_null_label: true
+  require_valid_labels: true
+  require_valid_languages: true
+  require_no_exact_duplicates: true
+  require_no_empty_text: true
+
+split:
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  # Joint stratification key = language + label combined, so the
+  # train/val/test split preserves both the en/ta ratio and the
+  # fake/real ratio independently within each language, not just
+  # marginally.
+  stratify_columns: ["language", "label"]
+  random_seed: 42
+
+output:
+  processed_dir: "datasets/processed"
+  cleaned_filename_csv: "cleaned_dataset.csv"
+  cleaned_filename_jsonl: "cleaned_dataset.jsonl"
+  split_dir: "datasets/processed"
+  train_filename: "train.csv"
+  val_filename: "validation.csv"
+  test_filename: "test.csv"
+  reports_dir: "outputs/module2"
+  statistics_filename: "preprocessing_statistics.json"
+  report_filename: "preprocessing_report.md"

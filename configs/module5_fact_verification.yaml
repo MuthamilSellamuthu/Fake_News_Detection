@@ -1,0 +1,233 @@
+# Module 5 — Fact Verification configuration.
+#
+# Same convention as Modules 1-4: every tunable value lives here.
+#
+# FROZEN, READ-ONLY (never written by this module):
+#   datasets/processed/*.csv, embeddings/, outputs/module3/, outputs/module4/,
+#   models/module4/
+#
+# Module 5 is INDEPENDENT of Module 4 by design. Module 4's predicted
+# fake/real label is never an input here: feeding a classifier's output
+# into the verifier that is meant to corroborate it creates circular
+# reasoning, and their agreement would then carry no information.
+# Late fusion happens in Module 6.
+
+# ====================================================================
+# A. External corpora — licence-gated, NOT yet downloaded
+# ====================================================================
+corpora:
+  # Datasets are kept SEPARATE end-to-end. `dataset` identity is carried
+  # on every claim record so results can be reported per corpus and
+  # domain mismatch stays visible instead of being averaged away.
+  merge_datasets: false
+  preserve_source_identity: true
+
+  x_fact:
+    enabled: true
+    role: "primary_multilingual"
+    # VERIFIED 2026-08-09 via https://github.com/utahnlp/x-fact/blob/main/LICENSE
+    # MIT License, Copyright (c) 2021 Utah NLP.
+    # NOTE: an earlier draft of this design recorded CC BY-NC 4.0. That
+    # was wrong. MIT imposes no non-commercial restriction, which
+    # removes the licensing risk previously flagged.
+    licence: "MIT"
+    licence_verified: true
+    licence_verified_date: "2026-08-09"
+    licence_url: "https://github.com/utahnlp/x-fact/blob/main/LICENSE"
+    source_url: "https://github.com/utahnlp/x-fact"
+    huggingface_id: "utahnlp/x-fact"
+    # The HF dataset requires an explicit config name; loading without
+    # one raises "Config name is missing". Available configs observed
+    # 2026-08-09: all_languages, ar, az, bn, de, es, fa, fr, gu, hi, id,
+    # it, ka, mr, nl, no, pa, pl, pt, ro, ru, si, sq, sr, ta, tr.
+    #
+    # "ta" is selected deliberately: the immediate research question is
+    # the Tamil subset, and pulling all_languages would download ~25x
+    # the data for no current purpose. Switch to "all_languages" only
+    # if a cross-lingual transfer experiment later needs the other
+    # languages as auxiliary training data.
+    hf_config: "ta"
+    hf_config_available: ["all_languages", "ar", "az", "bn", "de", "es", "fa", "fr", "gu",
+                          "hi", "id", "it", "ka", "mr", "nl", "no", "pa", "pl", "pt", "ro",
+                          "ru", "si", "sq", "sr", "ta", "tr"]
+    expected_total_claims: 31189      # across ALL languages, not the "ta" config
+    languages: 25
+    has_tamil: true
+    # Label set is X-FACT's own 7-way scheme; NOT remapped to S/R/NEI
+    # without an explicit, documented mapping.
+    label_scheme: "xfact_7way"
+    download_approved: false      # gate: flip only on explicit approval
+
+  fever:
+    enabled: true
+    role: "secondary_english_scale"
+    # VERIFIED 2026-08-09. FEVER annotations are released under the
+    # licence terms of the underlying Wikipedia pages, falling back to
+    # CC BY-SA 3.0. Share-alike obligations therefore apply to
+    # derivative releases of the annotations.
+    licence: "CC BY-SA 3.0 (Wikipedia terms; fallback)"
+    licence_verified: true
+    licence_verified_date: "2026-08-09"
+    licence_url: "https://fever.ai/dataset/fever.html"
+    huggingface_id: "fever/fever"
+    expected_total_claims: 185445
+    languages: 1
+    has_tamil: false
+    label_scheme: "supports_refutes_nei"
+    download_approved: false
+
+  project_corpus:
+    # The frozen 69,008-row Module 2 dataset. Used ONLY as a downstream
+    # application set: Module 5 emits evidence-grounded verification
+    # confidence for these records. Their binary fake/real labels are
+    # NOT treated as NLI labels and no S/R/NEI label is fabricated.
+    enabled: true
+    role: "application_set_no_nli_labels"
+    processed_dir: "datasets/processed"
+    expected_counts: {train: 48305, validation: 10351, test: 10352}
+    expected_total: 69008
+    expected_tamil_rows: 5408
+    read_only: true
+
+# ====================================================================
+# C. Claim selection — deterministic, no learned extractor
+# ====================================================================
+claim_selection:
+  # A learned claim-extraction model would need check-worthiness labels
+  # we do not have and could not validate. A documented deterministic
+  # rule is reproducible and honestly reportable; extraction is declared
+  # out of scope rather than hand-waved.
+  strategy: "title_as_claim"
+  title_field: "title"
+  fallback_field: "text"          # used when title is missing/too short
+  min_claim_chars: 15
+  max_claim_chars: 400
+  # Tamil records are headline-only (median 79 chars, 96.5% have no
+  # body), so the headline IS already a claim-like unit and selection is
+  # a no-op. English records are full articles (median 2,518 chars), so
+  # the title is the claim and the body becomes candidate evidence.
+  truncate_long_titles: true
+  drop_claims_below_min: true
+
+normalization:
+  unicode_form: "NFC"             # matches Module 2; Tamil-safe
+  lowercase_latin_only: true      # Tamil has no case
+  collapse_whitespace: true
+  strip_urls: true
+  strip_punctuation_for_hashing: true
+
+# ====================================================================
+# D. Leakage controls — applied BEFORE any split
+# ====================================================================
+leakage:
+  exact_dedup: true
+  near_duplicate_detection: true
+  near_duplicate_method: "char_ngram_jaccard"   # cheap, language-agnostic
+  near_duplicate_ngram: 5
+  near_duplicate_threshold: 0.90
+  # Fact-check corpora repeat the same claim across articles. Claims are
+  # grouped by (exact-normalised OR near-duplicate) and the WHOLE group
+  # is assigned to one split. Splitting inside a group would leak a test
+  # claim into training under a different surface form.
+  group_aware_split: true
+  group_key: "claim_group_id"
+  split_ratios: {train: 0.70, validation: 0.15, test: 0.15}
+  stratify_by: ["dataset", "language", "label"]
+  seed: 42
+  # Retrieval index composition per phase. Training must never be able
+  # to retrieve validation or test evidence.
+  index_scope:
+    train: ["train"]
+    validation: ["train", "validation"]
+    test: ["train", "validation", "test"]
+  # Gold evidence is permitted ONLY in the explicitly-labelled oracle
+  # ablation, never in the primary path.
+  gold_evidence_in_primary_path: false
+  oracle_ablation_enabled: true
+
+# ====================================================================
+# Retrieval / reranking / verification (stage 2 — not yet implemented)
+# ====================================================================
+retrieval:
+  bi_encoder: "sentence-transformers/LaBSE"
+  # XLM-R base is NOT used as the dense retriever: it has no
+  # sentence-level training objective and performs poorly as an
+  # out-of-the-box bi-encoder. LaBSE is trained for cross-lingual
+  # sentence alignment, which is precisely the Tamil-claim/English-
+  # evidence case this module studies.
+  alternative_bi_encoder: "intfloat/multilingual-e5-base"
+  index: "faiss_flat_ip"
+  embedding_dim: 768
+  normalize: true
+  top_k_candidates: 100
+  batch_size: 128
+
+reranking:
+  cross_encoder: "xlm-roberta-base"
+  max_length: 512
+  top_n_after_rerank: 5
+  batch_size: 32
+
+verifier:
+  encoder: "xlm-roberta-base"
+  max_length: 512
+  hidden_dim: 512
+  dropout: 0.1
+  epochs: 10
+  batch_size: 32
+  learning_rate: 0.00002
+  weight_decay: 0.01
+  early_stopping_patience: 3
+  monitor: "val_macro_f1"
+
+# ====================================================================
+# G. Evaluation
+# ====================================================================
+evaluation:
+  retrieval_metrics: ["recall@1", "recall@5", "recall@20", "precision@k", "mrr", "ndcg@10"]
+  verification_metrics: ["accuracy", "precision_macro", "recall_macro", "macro_f1", "ece"]
+  per_language: true
+  languages: ["en", "ta"]
+  per_dataset: true
+  confusion_matrix: true
+  reliability_diagram: true
+  ece_bins: 10
+  test_evaluated_once: true
+
+baselines:
+  majority: true
+  bm25: true
+  dense_retrieval: true
+  claim_only_verifier: true       # the critical control: does evidence help?
+  cross_encoder_verifier: true
+
+ablations:
+  bm25_vs_dense: true
+  top_k_values: [1, 5, 10, 20]
+  claim_only_vs_claim_evidence: true
+  english_only_vs_multilingual_evidence: true
+  retrieval_only_vs_retrieval_rerank: true
+  oracle_gold_evidence: true      # explicitly labelled upper bound
+  # CLS vs mean pooling deliberately EXCLUDED - Module 4 answered it.
+
+reproducibility:
+  seed: 42
+  seeds: [42, 43, 44]
+  deterministic: true
+
+runtime:
+  device: "auto"
+  use_mixed_precision: true
+
+output:
+  models_dir: "models/module5"
+  reports_dir: "outputs/module5"
+  figures_dir: "reports/figures/module5"
+  corpus_dir: "datasets/fact_verification"   # created only after approval
+  claims_filename: "claims.jsonl"
+  splits_filename: "claim_splits.json"
+  metrics_filename: "evaluation_metrics.json"
+  report_filename: "module5_report.md"
+
+logging:
+  log_filename: "module5.log"

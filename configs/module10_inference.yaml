@@ -1,0 +1,112 @@
+# Module 10 — Inference & User Demo
+#
+# READ-ONLY with respect to every trained artifact. This module fits nothing,
+# trains nothing and writes nothing outside outputs/module10/.
+#
+# Every tunable number that affects a DECISION (alpha, threshold, temperature)
+# is loaded at runtime from Module 7's frozen validation artifact. None of them
+# appear as literals here or anywhere in src/inference/. The only numbers in
+# this file are display conventions and cost ceilings, and they are marked.
+
+module: 10
+name: inference_and_demo
+
+# ------------------------------------------------------------------ inputs
+inputs:
+  # Module 3 (frozen): the config that ACTUALLY produced the stored embeddings.
+  # Confirmed by the Phase 1.5 provenance diagnostic:
+  #   [A] mean pooling, no normalisation -> |dP(fake)| 9.969e-01  FAIL
+  #   [B] mean pooling + L2 normalisation -> |dP(fake)| 2.056e-06 PASS
+  # NOTE: configs/embeddings.yaml is a DIFFERENT, unused config that disagrees
+  # on max_length, processed_dir and text_column. Do not read it here.
+  feature_config: configs/feature_config.yaml
+  embeddings_dir: embeddings
+
+  # Module 4 (frozen), Module 6 (frozen), Module 7 (frozen) — all via their
+  # own configs so a change there cannot silently desynchronise Module 10.
+  module7_config: configs/module7_integration.yaml
+  module6_config: configs/module6_retrieval_verification.yaml
+  processed_dir: datasets/processed
+
+  # Module 7's fitted parameters. MUST exist; inference fails loudly if not.
+  fusion_parameters: outputs/module7/validation/fusion_parameters.json
+
+# ------------------------------------------------- encoder provenance guard
+# MANDATORY. This is the guard against the Phase 1 defect, where Module 8's
+# LaBSE path silently fed a classifier trained on xlm-roberta-base vectors.
+# Both encoders emit 768 dims, so the mismatch raised no error and produced
+# saturated probabilities (LaBSE -> 0.000000, unnormalised XLM-R -> ~1.000000).
+#
+# The encoder refuses to initialise unless it reproduces a known record.
+# TOLERANCES ARE FIXED. Do not loosen them.
+#
+# NOTE ON COSINE: cosine similarity is SCALE-INVARIANT, so it cannot tell a
+# normalised vector from an unnormalised one -- in the diagnostic BOTH paths
+# scored 0.9999999994. The p_fake check is the load-bearing one. Cosine is
+# retained to catch a wrong-space encoder, which it does detect.
+encoder_self_check:
+  record_id: welfake_47809
+  split: test
+  min_cosine: 0.999
+  max_p_fake_delta: 1.0e-4
+
+# ---------------------------------------------------------------- retrieval
+retrieval:
+  primary: bm25          # Module 7's configured primary; do not silently swap
+  top_k: 10
+  phase: test            # index scope, matching Module 7
+  # Pools come from module7_integration.yaml inputs.evidence_datasets:
+  #   en -> fever, ta -> x_fact
+
+# ------------------------------------------------------------------ display
+# DISPLAY CONVENTIONS ONLY. None of these is fitted, and none changes the
+# REAL/FAKE decision, which is made solely by Module 7's frozen threshold.
+display:
+  # UNCERTAIN band. A verdict whose fused probability sits within this absolute
+  # distance of the frozen threshold is shown as UNCERTAIN *in addition to*,
+  # never instead of, the threshold decision. `final_prediction` in the JSON is
+  # always the raw threshold outcome; `display_state` carries the band.
+  uncertain_band: 0.05
+
+  # Confidence = how far into the decided region the probability sits, as a
+  # fraction of that region. NOT the same quantity as P(fake).
+  #     p >= threshold : (p - threshold) / (1 - threshold)
+  #     p <  threshold : (threshold - p) / threshold
+  # 0.0 exactly at the threshold, 1.0 at either extreme. Reported alongside
+  # P(fake), never as a replacement for it.
+  confidence_definition: distance_from_threshold_normalised
+
+  max_evidence_shown: 10
+  truncate_evidence_chars: 300
+
+# ---------------------------------------------------------- explainability
+explainability:
+  method: occlusion                # matches Module 8's primary method
+  mask_token: "[MASK]"
+  max_tokens: 128                  # cost ceiling: one forward pass per token
+  batch_size: 16
+  top_k_tokens: 10
+  # Live faithfulness for THIS input only. Module 8's stored faithfulness was
+  # computed over a different sample with an encoder now under question, so it
+  # is never displayed here.
+  faithfulness:
+    enabled: true
+    fractions: [0.1, 0.2, 0.3]
+    label: "Faithfulness — this input only"
+
+# ------------------------------------------------------------------- input
+input_validation:
+  min_chars: 40
+  max_chars: 50000
+
+# ------------------------------------------------------------------ output
+output:
+  root: outputs/module10
+  subdirs: [inference, manifests]
+  save_text_report: true
+
+# --------------------------------------------------------- reproducibility
+reproducibility:
+  seed: 42
+  deterministic: true
+  record_checkpoint_hashes: true

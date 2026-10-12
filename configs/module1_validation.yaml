@@ -1,0 +1,130 @@
+# Module 1 — dataset validation / label standardization / statistics config.
+#
+# Scope reminder (see docs/module1_overview.md): this is *lightweight*
+# processing only — exact-duplicate removal, language identification,
+# label standardization, and reporting. Text cleaning, contrastive pair
+# construction, filtering, and train/val/test splitting are Module 2's
+# job and are deliberately NOT configured here.
+
+raw_inputs:
+  english:
+    welfake:
+      path: "datasets/raw/english/welfake/WELFake_Dataset.csv"
+      title_col: "title"
+      text_col: "text"
+      label_col: "label"
+    isot:
+      fake_path: "datasets/raw/english/isot/extracted/Fake.csv"
+      real_path: "datasets/raw/english/isot/extracted/True.csv"
+      title_col: "title"
+      text_col: "text"
+  tamil:
+    # Every *.jsonl file under datasets/raw/tamil/<source>/ is picked up
+    # automatically by the validator; this list is only used to assign
+    # source_type (needed by label standardization's fallback rule).
+    sources:
+      boom_tamil: "fact_check"
+      dailythanthi: "mainstream_news"
+      dinamalar: "mainstream_news"
+      hindutamil: "mainstream_news"
+      youturn: "fact_check"
+      pib_factcheck: "fact_check"
+    # Direct-download Tamil sources (pre-labeled CSVs, not scraped JSONL) —
+    # loaded separately in dataset_validator._load_aanirudh_headlines and
+    # never routed through the keyword-scan/source-type-fallback label
+    # approximation used for the `sources:` list above.
+    direct_downloads:
+      aanirudh_headlines:
+        path: "datasets/raw/tamil/aanirudh_headlines/Tamil-News-Headlines.csv"
+        news_col: "News"
+        authenticity_col: "Authenticity"
+        # From the source repo's README (github.com/AAnirudh07/Fake-News-Headlines-In-Tamil) —
+        # used only to infer which polarity "Authenticity" uses; see the loader's docstring.
+        expected_fake_count: 2949
+        expected_real_count: 2324
+
+label_encoding:
+  fake: 1
+  real: 0
+
+label_rules:
+  isot:
+    fake_source_file: "Fake.csv"
+    real_source_file: "True.csv"
+
+  # WELFake's published convention is 0=fake, 1=real (verified against
+  # the dataset's own documentation) — inverted relative to this
+  # project's target convention (fake=1, real=0). Verified against the
+  # real downloaded file in this repo: label==0 -> 35,028 rows,
+  # label==1 -> 37,106 rows (see outputs/module1/dataset_statistics.json).
+  welfake:
+    original_fake_value: 0
+    original_real_value: 1
+
+  # Tamil sources collected in Module 1 carry no structured verdict
+  # field (title/body text only), so label assignment falls back to:
+  #   1. a keyword scan of the title+body for an explicit verdict, else
+  #   2. a source-type default (fact-check desks default to fake,
+  #      mainstream newsrooms default to real) — mirroring how the base
+  #      paper's IndoHoax dataset assumes a fact-checking platform's
+  #      submissions are majority-hoax. This is a documented
+  #      approximation; a manual verdict-labeling pass is recommended
+  #      before publication-grade use (see docs/module1_overview.md).
+  fact_check_sources: ["boom_tamil", "youturn", "pib_factcheck"]
+  mainstream_news_sources: ["dailythanthi", "dinamalar", "hindutamil"]
+
+  fake_verdict_keywords:
+    - "தவறான"        # "false/incorrect"
+    - "பொய்"          # "lie"
+    - "ஆழப்போலி"      # "deepfake"
+    - "வதந்தி"        # "rumour"
+    - "misleading"
+    - "false"
+    - "fake"
+    - "hoax"
+    - "fabricated"
+    - "morphed"
+
+  real_verdict_keywords:
+    - "உண்மை"              # "true"
+    - "உண்மையானது"
+    - "சரிபார்க்கப்பட்டது"  # "verified"
+    - "true"
+    - "verified"
+    - "correct"
+    - "genuine"
+
+  default_fact_check_label: 1   # fake, per base-paper-style source assumption
+  default_mainstream_label: 0   # real
+
+language_identification:
+  tamil_char_ratio_threshold: 0.3   # >= this fraction of alphabetic chars being Tamil => "ta"
+  langdetect_seed: 0                # deterministic langdetect output
+  # For large single-language source datasets (WELFake, ISOT — both
+  # documented as English-only), running langdetect on every row is
+  # unnecessary work (100k+ calls) for zero expected label change. The
+  # Tamil-ratio heuristic still runs on every row (cheap, catches any
+  # contamination); langdetect is only run on a bounded random sample
+  # for verification/reporting. Tamil sources are small enough
+  # (hundreds of rows) that every row runs both stages.
+  bulk_langdetect_sample_size: 300
+  bulk_langdetect_random_seed: 42
+
+validation:
+  # Rows missing title AND text (post title/body concatenation) are
+  # dropped as unusable; rows below this character count are also
+  # dropped (still "lightweight" — not the same as Module 2's
+  # normalization-aware cleaning).
+  min_text_length: 5
+  # Exact-duplicate detection key per source family.
+  english_dedup_subset: ["title", "text"]
+  tamil_dedup_key: "url"   # falls back to title if url missing
+
+output:
+  processed_dir: "datasets/processed"
+  dataset_filename_csv: "module1_dataset.csv"
+  dataset_filename_jsonl: "module1_dataset.jsonl"
+  reports_dir: "outputs/module1"
+  validation_report_filename: "validation_report.json"
+  statistics_report_json_filename: "dataset_statistics.json"
+  statistics_report_md_filename: "dataset_statistics.md"
