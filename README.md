@@ -1,3 +1,4 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23321604.svg)](https://doi.org/10.5281/zenodo.23321604)
 # Explainable Multilingual Fake News Detection
 
 Final Year B.E. (Computer Science) project — target venue: IEEE / Springer.
